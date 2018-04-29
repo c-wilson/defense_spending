@@ -181,4 +181,5 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
-*.txt
+data/*
+/src/apikey.config
