@@ -17,10 +17,12 @@ class ArticleScraper:
     """
 
     header = ['date', 'branch', 'city', 'state', 'amount', 'error']
+    _cities = set()
+    _states = set()
 
     def __init__(self, url, cities_data_path=cities_path):
         self.bytes_processed = 0
-        self._cities, self._states = self._parse_cities(cities_data_path)
+        self._parse_cities(cities_data_path)
         self.url = url
         self.errors = []
         article = self.article_getter(url)
@@ -36,19 +38,17 @@ class ArticleScraper:
         :param filename: Path to the CSV with city & state data.
         :return: a tuple of 2 sets.
         """
-        cities = set()
-        states = set()
         f = csv.reader(open(filename, 'r'), delimiter='|')
         next(f)  # skip header
         for row in f:
             try:
                 city, st_1, st_2, *rest = row
-                cities.add(city.lower())
+                self._cities.add(city.lower())
                 # states.add(st_1.lower())
-                states.add(st_2.lower())
+                self._states.add(st_2.lower())
             except:
                 pass
-        return cities, states
+        return
 
     def article_getter(self, url):
         pg = requests.get(url)
@@ -75,7 +75,7 @@ class ArticleScraper:
         transactions = []
         for p in graphs:  #type: bs4.element.Tag
             if p.attrs.get('style') == 'text-align: center;':
-                branch = p.get_text().strip()
+                branch = p.get_text().replace("CONTRACTS", '').strip().upper()
             else:
                 txt = p.get_text().strip()
                 if txt and not txt.startswith('*'):  # todo: are there other exclusion criteria?
@@ -100,15 +100,18 @@ class ArticleScraper:
         last_city = -10
         for i, s_dirty in enumerate(pre_dollar.split(',')):
             s = s_dirty.strip('*').strip()
-            if i - last_city != 1 and s.lower() in self._cities:
+            matcher = s.lower()
+            #             print(matcher)
+            if i - last_city != 1 and matcher in self._cities:
                 result['cities'].append(s)
                 last_city = i
             elif i - last_city == 1:
-                if s.lower() in self._states:
+                print(matcher)
+                if matcher in self._states:
                     result['states'].append(s)
                 else:
                     for state in self._states:
-                        if state in s.lower():
+                        if state in matcher:
                             result['states'].append(state)
 
         if len(result['cities']) != len(result['states']) or not result['cities']:
