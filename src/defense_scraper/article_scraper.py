@@ -7,6 +7,7 @@ import bs4
 import dateparser
 import csv
 import os
+import json
 
 cities_path = '/Users/chris/PycharmProjects/defense_spending/src/defense_scraper/resources/us_cities_states_counties.csv'
 
@@ -20,9 +21,11 @@ class ArticleScraper:
     _cities = set()
     _states = set()
 
-    def __init__(self, url, cities_data_path=cities_path):
+    def __init__(self, url, city_states, state_names):
         self.bytes_processed = 0
-        self._parse_cities(cities_data_path)
+        self.citynames = city_states
+        self.statenames = state_names
+        # self._parse_cities(city_states_json_path, state_names_json_path)
         self.url = url
         self.errors = []
         article = self.article_getter(url)
@@ -30,36 +33,17 @@ class ArticleScraper:
         self.data = self.parse_graphs(article)
 
 
-
-    def _parse_cities(self, filename: str):
-        """
-        Returns sets of city and state names for use when parsing.
-
-        :param filename: Path to the CSV with city & state data.
-        :return: a tuple of 2 sets.
-        """
-        f = csv.reader(open(filename, 'r'), delimiter='|')
-        next(f)  # skip header
-        for row in f:
-            try:
-                city, st_1, st_2, *rest = row
-                self._cities.add(city.lower())
-                # states.add(st_1.lower())
-                self._states.add(st_2.lower())
-            except:
-                pass
-        return
-
     def article_getter(self, url):
         pg = requests.get(url)
         self.bytes_processed += len(pg.text)
-        return BeautifulSoup(pg.text, "html.parser")
+        return BeautifulSoup(pg.text, "html5lib")
 
     def parse_date(self, soup: BeautifulSoup):
         span = soup.find('span', class_='date')
         txt = span.text
         date_line = txt.splitlines()[3].strip()
         date = dateparser.parse(date_line)
+
         return date
 
     def parse_graphs(self, soup: BeautifulSoup):
@@ -96,30 +80,47 @@ class ArticleScraper:
             'error': 0
         }
 
+        text = text.replace('\r\n', ' ')
+        states = None
+        city = None
+        city_count =0
         pre_dollar, post_dollar, *rest = text.split('$')
-        last_city = -10
         for i, s_dirty in enumerate(pre_dollar.split(',')):
-            s = s_dirty.strip('*').strip()
-            matcher = s.lower()
-            #             print(matcher)
-            if i - last_city != 1 and matcher in self._cities:
-                result['cities'].append(s)
-                last_city = i
-            elif i - last_city == 1:
-                print(matcher)
-                if matcher in self._states:
-                    result['states'].append(s)
-                else:
-                    for state in self._states:
-                        if state in matcher:
-                            result['states'].append(state)
+            s = ''.join([x.lower() for x in s_dirty if x.isalpha() or x.isspace()])
+            matcher = s.strip()
+            if not states and matcher in self.citynames.keys() :
+                city = matcher
+                states = self.citynames[matcher]
 
-        if len(result['cities']) != len(result['states']) or not result['cities']:
+            elif states and city:
+                matched = False
+                for st in states:
+                    statenames = self.statenames[st]
+                    for sn in statenames:
+                        pattern = r'(?=\w){}(?!\w)'.format(sn)
+                        if re.match(pattern, matcher):
+                            result['cities'].append(city)
+                            result['states'].append(st)
+                            city_count += 1
+                            matched = True
+                            states = None
+                            city = None
+                            break
+                    if matched:
+                        break
+
+                if not matched:
+                    result['error'] += 1
+                states = None
+                city = None
+
+        if not city_count:
             raise ScrapingError
 
-        amount_str_dirty, *rest = post_dollar.split(' ')
+        amount_str_dirty, *rest = post_dollar.split()
         amount_str, *rest = amount_str_dirty.split('.')  # for cents which are in some...
-        result['amount'] = int(amount_str.replace(',', ''))
+
+        result['amount'] = int(''.join(x for x in amount_str if x.isnumeric()))
 
         return result
 
@@ -166,14 +167,11 @@ class ArticleScraper:
             f.write('\n')
             for er in self.errors:
                 f.write(er)
+                f.write('\n-------\n')
         return
 
 
-
-
-
 def load_article_numbers(filename):
-
     with open(filename) as f:
         articles = []
         s = f.readline()
@@ -182,6 +180,7 @@ def load_article_numbers(filename):
                 if not x == '\n':
                     articles.append(x)
             s = f.readline()
+    print(len(articles))
     return articles
 
 
@@ -191,19 +190,23 @@ def make_urls(article_numbers):
     return urls
 
 
-def main(article_path, cities_path, save_path, ):
+def main(article_path, city_states_json_path, state_names_json_path, save_path, ):
     errorpath = save_path + '.err.txt'
 
     if os.path.exists(save_path):
         os.remove(save_path)
     if os.path.exists(errorpath):
         os.remove(errorpath)
-    tpe = ProcessPoolExecutor(5)
+    tpe = ProcessPoolExecutor(3)
     urls = make_urls(load_article_numbers(article_path))
     futures = []
+
+    cities, states = parse_cities(city_states_json_path, state_names_json_path)
+
     for u in urls:
-        fut = tpe.submit(ArticleScraper, u, cities_path)
+        fut = tpe.submit(ArticleScraper, u, cities, states)
         futures.append(fut)
+    print(len(urls))
 
     total_bytes = 0
 
@@ -216,6 +219,25 @@ def main(article_path, cities_path, save_path, ):
     print('Total bytes: {}'.format(total_bytes))
 
 
+def parse_cities(city_states_json_path, state_names_json_path):
+        """
+        Returns sets of city and state names for use when parsing.
+
+        :param filename: Path to the CSV with city & state data.
+        :return: a tuple of 2 sets.
+        """
+        with open(city_states_json_path, 'r') as f:
+            city_states_ = json.load(f)
+        with open(state_names_json_path, 'r') as f:
+            statenames = json.load(f)
+
+        citynames = {}
+
+        for k, v in city_states_.items():
+            citynames[k] = set(v)
+        return citynames, statenames
+
+
 class ScrapingError(ValueError):
     pass
 
@@ -223,6 +245,7 @@ class ScrapingError(ValueError):
 if __name__ == '__main__':
     main(
         '/Users/chris/PycharmProjects/defense_spending/data/scraping/article_numbers.txt',
-        '/Users/chris/PycharmProjects/defense_spending/src/defense_scraper/resources/us_cities_states_counties.csv',
-        '/Users/chris/PycharmProjects/defense_spending/data/scraping/articles.csv'
+        '/Users/chris/PycharmProjects/defense_spending/src/defense_scraper/resources/city_states.json',
+        '/Users/chris/PycharmProjects/defense_spending/src/defense_scraper/resources/state_names.json',
+        '/Users/chris/PycharmProjects/defense_spending/data/scraping/articles_.csv'
     )

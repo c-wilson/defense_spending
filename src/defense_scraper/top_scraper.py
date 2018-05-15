@@ -7,33 +7,36 @@ from tqdm import tqdm
 YEARS = range(2014, 2019)
 MONTHS = range(1, 13)
 
+class TopScraper:
+    """Scrapes DoD contracts website (not archive) for contract article pages."""
+    def __init__(self, url):
+        """
+        Gets and scrapes provided URL for links to articles.
+        :param url:
+        :return:
+        """
 
-def top_scraper(url):
-    """
-    Gets and scrapes provided URL for links to articles.
-    :param url:
-    :return:
-    """
+        expression = r'https://www.defense.gov/News/Contracts/Contract-View/Article/([^/\">]*)'
+        pg = requests.get(url)
 
-    expression = r'https://www.defense.gov/News/Contracts/Contract-View/Article/([^/\">]*)'
-    pg = requests.get(url)
+        it = re.finditer(expression, pg.text)
 
-    it = re.finditer(expression, pg.text)
+        results = []
 
-    results = []
+        for i in it:
+            results.append(i.group(1))
+        self.results = results
 
-    for i in it:
-        results.append(i.group(1))
-    return results
+        return
 
 
-def save(fn, resultlist):
-    with open(fn, 'a') as f:
-        for ln in resultlist:
-            f.write(ln)
-            f.write(', ')
-        f.write('\n')
-    return
+    def save(self, fn):
+        with open(fn, 'a') as f:
+            for ln in self.results:
+                f.write(ln)
+                f.write(', ')
+            f.write('\n')
+        return
 
 
 def main(filename):
@@ -46,7 +49,7 @@ def main(filename):
     for y in YEARS[:]:
         for m in MONTHS:
             pattern_ = pattern.format(y, m)
-            future = tpe.submit(top_scraper, pattern_)
+            future = tpe.submit(TopScraper, pattern_)
             futures.append(future)
 
     ex_count = 0
@@ -55,8 +58,9 @@ def main(filename):
             result = f.result()
             # print(result)
             if result:
-                save(filename, result)
+                result.save(filename)
         except Exception as e:
+            print(e)
             ex_count += 1
     print('Exceptions: {}'.format(ex_count))
 

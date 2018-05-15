@@ -183,3 +183,4 @@ Temporary Items
 .apdisk
 data/*
 /src/apikey.config
+/src/geocod_apikey.txt
